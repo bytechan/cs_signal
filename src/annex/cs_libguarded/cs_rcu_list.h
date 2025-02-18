@@ -247,6 +247,7 @@ class rcu_list<T, M, Alloc>::rcu_guard
 
          other.m_zombie = nullptr;
          other.m_list   = nullptr;
+         return *this;
       }
 
       void rcu_read_lock(const rcu_list<T, M, Alloc> &list);
