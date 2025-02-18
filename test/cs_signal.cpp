@@ -42,7 +42,7 @@ TEST_CASE("CsSignal connect_method", "[cs_signal]")
 
    Demo_Receiver objReceiver = Demo_Receiver{};
 
-   connect(okButton, &Demo_PushButton::pressed, objReceiver, &Demo_Receiver::methodPressed);
+   connect(&okButton, &Demo_PushButton::pressed, &objReceiver, &Demo_Receiver::methodPressed);
 
    // ensure slot has not been accidentally called
    REQUIRE(objReceiver.m_slotPressed == 0);
@@ -62,7 +62,7 @@ TEST_CASE("CsSignal connect_lambda", "[cs_signal]")
 
    Demo_Receiver objReceiver = Demo_Receiver{};
 
-   connect(okButton, &Demo_PushButton::pressed, objReceiver,
+   connect(&okButton, &Demo_PushButton::pressed, &objReceiver,
       [&slotPressed]() { ++slotPressed; } );
 
    // ensure slot has not been called
@@ -80,7 +80,7 @@ TEST_CASE("CsSignal connect_template", "[cs_signal]")
 
    Demo_Receiver objReceiver = Demo_Receiver{};
 
-   connect(okButton, &Demo_PushButton::pressed, objReceiver, &Demo_Receiver::templatePressed<int>);
+   connect(&okButton, &Demo_PushButton::pressed, &objReceiver, &Demo_Receiver::templatePressed<int>);
 
    // ensure slot has not been called
    REQUIRE(objReceiver.m_slotPressed == 0);
@@ -97,7 +97,7 @@ TEST_CASE("CsSignal connect_toggled", "[cs_signal]")
 
    Demo_Receiver objReceiver = Demo_Receiver{};
 
-   connect(okButton, &Demo_PushButton::toggled, objReceiver, &Demo_Receiver::toggled);
+   connect(&okButton, &Demo_PushButton::toggled, &objReceiver, &Demo_Receiver::toggled);
 
    // ensure slot has not been called
    REQUIRE(objReceiver.m_slotPressed == 0);
@@ -138,14 +138,14 @@ TEST_CASE("CsSignal discontent", "[cs_signal]")
 
    Demo_Receiver objReceiver = Demo_Receiver{};
 
-   connect(okButton, &Demo_PushButton::pressed, objReceiver, &Demo_Receiver::methodPressed);
+   connect(&okButton, &Demo_PushButton::pressed, &objReceiver, &Demo_Receiver::methodPressed);
 
    // ensure slot has not been called
    REQUIRE(objReceiver.m_slotPressed == 0);
 
    okButton.pressed();
 
-   disconnect(okButton, &Demo_PushButton::pressed, objReceiver, &Demo_Receiver::methodPressed);
+   disconnect(&okButton, &Demo_PushButton::pressed, &objReceiver, &Demo_Receiver::methodPressed);
 
    okButton.pressed();
 
@@ -172,7 +172,7 @@ TEST_CASE("CsSignal thread", "[cs_signal]")
    objReceiver.m_mutex = &mutex;
    objReceiver.m_alarm = &alarm;
 
-   connect(okButton, &Demo_PushButton::pressed, objReceiver, &Demo_Receiver::threadPressed,
+   connect(&okButton, &Demo_PushButton::pressed, &objReceiver, &Demo_Receiver::threadPressed,
          CsSignal::ConnectionKind::QueuedConnection);
 
    // ensure slot has not been called
