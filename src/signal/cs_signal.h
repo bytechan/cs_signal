@@ -156,7 +156,7 @@ void activate(Sender &sender, void (SignalClass::*signal)(SignalArgTypes...), Ts
    const SignalBase *senderPtr = &sender;
 
    // store the signal data, false indicates the data will not be copied
-   CsSignal::Internal::TeaCup_Data<SignalArgTypes...> dataPack(false, std::forward<Ts>(Vs)...);
+   Internal::TeaCup_Data<SignalArgTypes...> dataPack(false, std::forward<Ts>(Vs)...);
 
    SignalBase *priorSender = SlotBase::get_threadLocal_currentSender();
    SlotBase::get_threadLocal_currentSender() = &sender;
@@ -166,11 +166,15 @@ void activate(Sender &sender, void (SignalClass::*signal)(SignalArgTypes...), Ts
 
    // threading and queuedConnections
    auto senderListHandle = sender.m_connectList.lock_read();
+   auto iter = senderListHandle->begin();
+   const auto end = senderListHandle->end();
 
-   for (const auto &connection : *senderListHandle) {
+   while (iter != end) {
+      const auto &connection = *iter;
 
-      if (*(connection.signalMethod) != signal_Bento)  {
+      if (*(connection.signalMethod) != signal_Bento) {
          // no match in connectionList for this signal
+         ++iter;
          continue;
       }
 
@@ -179,86 +183,45 @@ void activate(Sender &sender, void (SignalClass::*signal)(SignalArgTypes...), Ts
       // const reference to a unique ptr
       const std::unique_ptr<const CsSignal::Internal::BentoAbstract> &slot_Bento = connection.slotMethod;
 
-      bool receiverInSameThread = receiver->compareThreads();
+      ++iter;
 
-      int old_activateBusy = sender.m_activateBusy;
-      sender.m_activateBusy++;
+      if (! receiver) {
+         continue;
+      }
 
-      try {
+      // check if this is a queued connection
+      if (connection.type == ConnectionKind::QueuedConnection ||
+            (connection.type == ConnectionKind::AutoConnection && ! receiver->compareThreads())) {
 
-         if ( (connection.type == ConnectionKind::AutoConnection && ! receiverInSameThread) ||
-              (connection.type == ConnectionKind::QueuedConnection)) {
+         // create a copy of the signal parameters
+         auto teaCup_Data = Internal::make_unique<Internal::TeaCup_Data<SignalArgTypes...>>(true, std::forward<Ts>(Vs)...);
 
-            // passing true indicates the data will be copied (stored on the heap)
-            PendingSlot tempObj(&sender, signal_Bento.clone(), receiver, slot_Bento->clone(),
-                  std::make_unique<CsSignal::Internal::TeaCup_Data<SignalArgTypes...>>(true, std::forward<Ts>(Vs)... ));
+         // make a copy of the signal and slot bentos
+         std::unique_ptr<Internal::BentoAbstract> signal_Bento_Copy = signal_Bento.clone();
+         std::unique_ptr<Internal::BentoAbstract> slot_Bento_Copy   = slot_Bento->clone();
 
-            receiver->queueSlot(std::move(tempObj), ConnectionKind::QueuedConnection);
+         // create a PendingSlot, this will be added to the receivers event queue
+         PendingSlot data(&sender, std::move(signal_Bento_Copy), receiver,
+                  std::move(slot_Bento_Copy), std::move(teaCup_Data));
 
-         } else if (connection.type == ConnectionKind::BlockingQueuedConnection) {
+         receiver->queueSlot(std::move(data), connection.type);
 
-            // passing false indicates the data will not be copied
-            PendingSlot tempObj(&sender, signal_Bento.clone(), receiver, slot_Bento->clone(),
-                  std::make_unique<CsSignal::Internal::TeaCup_Data<SignalArgTypes...>>(false, std::forward<Ts>(Vs)... ));
-
-            receiver->queueSlot(std::move(tempObj), ConnectionKind::BlockingQueuedConnection);
-
-         } else if (connection.type == ConnectionKind::DirectConnection || connection.type == ConnectionKind::AutoConnection) {
-            // direct connection
-
-            // invoke calls the actual method
-            slot_Bento->invoke(receiver, &dataPack);
-         }
-
-         std::lock_guard<std::mutex> lock(SignalBase::get_mutex_beingDestroyed());   // should be a read lock
-
-         if (SignalBase::get_beingDestroyed().count(senderPtr)) {
-            // sender has been destroyed
-            SlotBase::get_threadLocal_currentSender()   = priorSender;
-            SignalBase::get_threadLocal_currentSignal() = priorSignal;
-
-            if (old_activateBusy == 0)  {
-               SignalBase::get_beingDestroyed().erase(senderPtr);
-            }
-
-            return;
-         }
-
-      } catch (...) {
-         SlotBase::get_threadLocal_currentSender()   = priorSender;
-         SignalBase::get_threadLocal_currentSignal() = priorSignal;
-
-         std::lock_guard<std::mutex> lock(SignalBase::get_mutex_beingDestroyed());   // should be a read lock
-
-         if (SignalBase::get_beingDestroyed().count(senderPtr)) {
-            // sender has been destroyed, all done
-
-            if (old_activateBusy == 0)  {
-               SignalBase::get_beingDestroyed().erase(senderPtr);
-            }
-
-            return;
-
-         } else {
-            sender.handleException(std::current_exception());
-            SlotBase::get_threadLocal_currentSender() = &sender;
-
-         }
+         continue;
       }
 
       try {
-         sender.m_activateBusy--;
+         // direct connection
+         Internal::TeaCup_Data<SignalArgTypes...> dataPack(false, std::forward<Ts>(Vs)...);
+         slot_Bento->invoke(receiver, &dataPack);
 
-      } catch (std::exception &) {
-         SlotBase::get_threadLocal_currentSender()   = priorSender;
-         SignalBase::get_threadLocal_currentSignal() = priorSignal;
-
-         std::throw_with_nested(std::invalid_argument("activate(): Failed to obtain sender lock"));
+      } catch (...) {
+         // catch and save the exception
+         sender.handleException(std::current_exception());
       }
    }
 
-   SlotBase::get_threadLocal_currentSender()   = priorSender;
    SignalBase::get_threadLocal_currentSignal() = priorSignal;
+   SlotBase::get_threadLocal_currentSender()   = priorSender;
 }
 
 // signal & slot method ptr
@@ -309,18 +272,24 @@ bool connect(const Sender &sender, void (SignalClass::*signalMethod)(SignalArgs.
 
    if (uniqueConnection) {
       // ensure the connection is not added twice
+      auto iter = senderListHandle->begin();
+      const auto end = senderListHandle->end();
 
-      for (auto &item : *senderListHandle) {
+      while (iter != end) {
+         const auto &item = *iter;
 
          if (item.receiver != &receiver) {
+            ++iter;
             continue;
          }
 
-         if (*(item.signalMethod) != *(signalMethod_Bento))  {
+         if (*(item.signalMethod) != *(signalMethod_Bento)) {
+            ++iter;
             continue;
          }
 
-         if (*(item.slotMethod) != *(slotMethod_Bento))  {
+         if (*(item.slotMethod) != *(slotMethod_Bento)) {
+            ++iter;
             continue;
          }
 
@@ -358,14 +327,19 @@ bool connect(const Sender &sender, void (SignalClass::*signalMethod)(SignalArgs.
 
    if (uniqueConnection) {
       // ensure the connection is not added twice
+      auto iter = senderListHandle->begin();
+      const auto end = senderListHandle->end();
 
-      for (auto &item : *senderListHandle) {
+      while (iter != end) {
+         const auto &item = *iter;
 
          if (item.receiver != &receiver) {
+            ++iter;
             continue;
          }
 
-         if (*(item.signalMethod) != *(signalMethod_Bento))  {
+         if (*(item.signalMethod) != *(signalMethod_Bento)) {
+            ++iter;
             continue;
          }
 
@@ -391,18 +365,24 @@ bool connect(const Sender &sender, std::unique_ptr<Internal::BentoAbstract> sign
 
    if (uniqueConnection) {
       // ensure the connection is not added twice
+      auto iter = senderListHandle->begin();
+      const auto end = senderListHandle->end();
 
-      for (const auto &item : *senderListHandle) {
+      while (iter != end) {
+         const auto &item = *iter;
 
          if (item.receiver != &receiver) {
+            ++iter;
             continue;
          }
 
-         if (*(item.signalMethod) != *(signalMethod_Bento))  {
+         if (*(item.signalMethod) != *(signalMethod_Bento)) {
+            ++iter;
             continue;
          }
 
-         if (*(item.slotMethod) != *(slotMethod_Bento))  {
+         if (*(item.slotMethod) != *(slotMethod_Bento)) {
+            ++iter;
             continue;
          }
 
@@ -523,14 +503,18 @@ class cs_mp_cast_internal
 {
  public:
    template<class className>
-   constexpr auto operator()(void (className::*methodPtr)(Args ...)) const {
+   constexpr auto operator()(void (className::*methodPtr)(Args ...)) const
+      -> decltype(methodPtr)
+   {
       return methodPtr;
    }
 };
 
 template<class... Args>
-constexpr cs_mp_cast_internal<Args...> cs_mp_cast;
-
+constexpr cs_mp_cast_internal<Args...> cs_mp_cast()
+{
+   return cs_mp_cast_internal<Args...>();
+}
 
 // 2
 template<class... Args>
@@ -538,12 +522,17 @@ class cs_cmp_cast_internal
 {
  public:
    template<class className>
-   constexpr auto operator()(void (className::*methodPtr)(Args ...) const) const {
+   constexpr auto operator()(void (className::*methodPtr)(Args ...) const) const
+      -> decltype(methodPtr)
+   {
       return methodPtr;
    }
 };
 
 template<class... Args>
-constexpr cs_cmp_cast_internal<Args...> cs_cmp_cast;
+constexpr cs_cmp_cast_internal<Args...> cs_cmp_cast()
+{
+   return cs_cmp_cast_internal<Args...>();
+}
 
 #endif

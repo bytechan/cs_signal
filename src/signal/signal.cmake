@@ -8,7 +8,7 @@ target_compile_definitions(CsSignal
 
 target_compile_features(CsSignal
    PUBLIC
-   cxx_std_20
+   cxx_std_11
 )
 
 if (CsLibGuarded_FOUND)

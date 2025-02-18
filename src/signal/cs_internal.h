@@ -31,6 +31,31 @@ class SlotBase;
 
 namespace Internal {
 
+// C++11 compatible implementation of index_sequence
+template<std::size_t... Is>
+struct index_sequence {};
+
+template<std::size_t N, std::size_t... Is>
+struct make_index_sequence_helper : make_index_sequence_helper<N-1, N-1, Is...> {};
+
+template<std::size_t... Is>
+struct make_index_sequence_helper<0, Is...> {
+   using type = index_sequence<Is...>;
+};
+
+template<std::size_t N>
+using make_index_sequence = typename make_index_sequence_helper<N>::type;
+
+template<class... T>
+using index_sequence_for = make_index_sequence<sizeof...(T)>;
+
+// C++11 compatible implementation of make_unique
+template<typename T, typename... Args>
+std::unique_ptr<T> make_unique(Args&&... args)
+{
+   return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+}
+
 // 1
 template<class T, class U, class = void>
 class cs_check_connect_args
@@ -125,26 +150,29 @@ class CSVoidReturn
 // ** index_sequence unpacks a tuple into arguments for function pointer
 
 template<typename ...FunctionArgTypes, typename FunctionReturn, typename ...TupleTypes, size_t ...Ks>
-FunctionReturn cs_unpack_function_args_internal(FunctionReturn (*functionPtr)(FunctionArgTypes...),
-                  const std::tuple<TupleTypes...> &data, std::index_sequence<Ks...>)
+inline FunctionReturn cs_unpack_function_args_internal(FunctionReturn (*functionPtr)(FunctionArgTypes...),
+                  const std::tuple<TupleTypes...> &data, Internal::index_sequence<Ks...>)
 {
-   return functionPtr(std::get<Ks>(data)...);
+   return (*functionPtr)(std::get<Ks>(data)...);
 }
 
 // (api) specialization function pointer
 template<typename ...FunctionArgTypes, typename FunctionReturn, typename ...TupleTypes>
-FunctionReturn cs_unpack_function_args(FunctionReturn (*functionPtr)(FunctionArgTypes...),
+inline FunctionReturn cs_unpack_function_args(FunctionReturn (*functionPtr)(FunctionArgTypes...),
                   const std::tuple<TupleTypes...> &data)
 {
-   return cs_unpack_function_args_internal(functionPtr, data, std::index_sequence_for<TupleTypes...> {} );
+   return cs_unpack_function_args_internal(functionPtr, data,
+         Internal::make_index_sequence<sizeof...(TupleTypes)>());
 }
 
 // (api) specialization function pointer, return type is void
 template<typename ...FunctionArgTypes, typename ...TupleTypes>
-CSVoidReturn cs_unpack_function_args(void (*functionPtr)(FunctionArgTypes...), const std::tuple<TupleTypes...> &data)
+inline CSVoidReturn cs_unpack_function_args(void (*functionPtr)(FunctionArgTypes...), const std::tuple<TupleTypes...> &data)
 {
-   cs_unpack_function_args_internal(functionPtr, data, std::index_sequence_for<TupleTypes...> {} );
-   return CSVoidReturn {};
+   cs_unpack_function_args_internal(functionPtr, data,
+         Internal::make_index_sequence<sizeof...(TupleTypes)>());
+
+   return CSVoidReturn();
 }
 
 
@@ -152,55 +180,61 @@ CSVoidReturn cs_unpack_function_args(void (*functionPtr)(FunctionArgTypes...), c
 // ** index_sequence unpacks a tuple into arguments for a method pointer
 
 template<typename MethodClass, class MethodReturn, typename ...MethodArgTypes, typename ...TupleTypes, size_t ...Ks>
-MethodReturn cs_unpack_method_args_internal(MethodClass *obj, MethodReturn (MethodClass::*methodPtr)(MethodArgTypes...),
-                  const std::tuple<TupleTypes...> &data, std::index_sequence<Ks...>)
+inline MethodReturn cs_unpack_method_args_internal(MethodClass *obj, MethodReturn (MethodClass::*methodPtr)(MethodArgTypes...),
+                  const std::tuple<TupleTypes...> &data, Internal::index_sequence<Ks...>)
 {
    return (obj->*methodPtr)(std::get<Ks>(data)...);
 }
 
 // (api) specialization method pointer
 template<typename MethodClass, class MethodReturn, typename ...MethodArgTypes, typename ...TupleTypes>
-MethodReturn cs_unpack_method_args(MethodClass *obj, MethodReturn (MethodClass::*methodPtr)(MethodArgTypes...),
+inline MethodReturn cs_unpack_method_args(MethodClass *obj, MethodReturn (MethodClass::*methodPtr)(MethodArgTypes...),
                   const std::tuple<TupleTypes...> &data)
 {
-   return cs_unpack_method_args_internal(obj, methodPtr, data, std::index_sequence_for<TupleTypes...> {} );
+   return cs_unpack_method_args_internal(obj, methodPtr, data,
+         Internal::make_index_sequence<sizeof...(TupleTypes)>());
 }
 
 // (api) specialization for method pointer, return type is void
 template<typename MethodClass, typename ...MethodArgTypes, typename ...TupleTypes>
-CSVoidReturn cs_unpack_method_args(MethodClass *obj, void (MethodClass::*methodPtr)(MethodArgTypes...),
+inline CSVoidReturn cs_unpack_method_args(MethodClass *obj, void (MethodClass::*methodPtr)(MethodArgTypes...),
                   const std::tuple<TupleTypes...> &data)
 {
-   cs_unpack_method_args_internal(obj, methodPtr, data, std::index_sequence_for<TupleTypes...> {} );
-   return CSVoidReturn {};
+   cs_unpack_method_args_internal(obj, methodPtr, data,
+         Internal::make_index_sequence<sizeof...(TupleTypes)>());
+
+   return CSVoidReturn();
 }
 
 // ** index_sequence unpacks a tuple into arguments for a const method pointer
 
 template<typename MethodClass, class MethodReturn, typename ...MethodArgTypes, typename ...TupleTypes, size_t ...Ks>
-MethodReturn cs_unpack_method_args_internal(const MethodClass *obj,
+inline MethodReturn cs_unpack_method_args_internal(const MethodClass *obj,
                   MethodReturn (MethodClass::*methodPtr)(MethodArgTypes...) const,
-                  const std::tuple<TupleTypes...> &data, std::index_sequence<Ks...>)
+                  const std::tuple<TupleTypes...> &data, Internal::index_sequence<Ks...>)
 {
    return (obj->*methodPtr)(std::get<Ks>(data)...);
 }
 
 // (api) specialization for const method pointer
 template<typename MethodClass, class MethodReturn, typename ...MethodArgTypes, typename ...TupleTypes>
-MethodReturn cs_unpack_method_args(const MethodClass *obj,
+inline MethodReturn cs_unpack_method_args(const MethodClass *obj,
                   MethodReturn (MethodClass::*methodPtr)(MethodArgTypes...) const,
                   const std::tuple<TupleTypes...> &data)
 {
-   return cs_unpack_method_args_internal(obj, methodPtr, data, std::index_sequence_for<TupleTypes...> {} );
+   return cs_unpack_method_args_internal(obj, methodPtr, data,
+         Internal::make_index_sequence<sizeof...(TupleTypes)>());
 }
 
 // (api) specialization for const method pointer, return type is void
 template<typename MethodClass, typename ...MethodArgTypes, typename ...TupleTypes>
-CSVoidReturn cs_unpack_method_args(const MethodClass *obj, void (MethodClass::*methodPtr)(MethodArgTypes...) const,
+inline CSVoidReturn cs_unpack_method_args(const MethodClass *obj, void (MethodClass::*methodPtr)(MethodArgTypes...) const,
                   const std::tuple<TupleTypes...> &data)
 {
-   cs_unpack_method_args_internal(obj, methodPtr, data, std::index_sequence_for<TupleTypes...> {} );
-   return CSVoidReturn {};
+   cs_unpack_method_args_internal(obj, methodPtr, data,
+         Internal::make_index_sequence<sizeof...(TupleTypes)>());
+
+   return CSVoidReturn();
 }
 
 
@@ -357,7 +391,7 @@ TeaCup<std::tuple<Ts...>>::TeaCup(T lambda)
 // ** template functions use Index_Sequence to convert a tuple to R
 
 template<class R, class T, size_t ...Ks>
-R convert_tuple_internal(T &data, std::index_sequence<Ks...>)
+R convert_tuple_internal(T &data, Internal::index_sequence<Ks...>)
 {
    return R {std::get<Ks>(data)...};
 }
@@ -365,7 +399,7 @@ R convert_tuple_internal(T &data, std::index_sequence<Ks...>)
 template<class R, class ...Ts>
 R convert_tuple(std::tuple<Ts...> &data)
 {
-   return convert_tuple_internal<R> (data, std::index_sequence_for<Ts...> {} );
+   return convert_tuple_internal<R> (data, Internal::index_sequence_for<Ts...> {} );
 }
 
 
@@ -490,7 +524,7 @@ Bento<T>::Bento(T lambda)
 template<class T>
 std::unique_ptr<BentoAbstract> Bento<T>::clone() const
 {
-   return std::make_unique<Bento<T>>(*this);
+   return Internal::make_unique<Bento<T>>(*this);
 }
 
 template<class T>
@@ -559,7 +593,7 @@ Bento<FunctionReturn (*)(FunctionArgs...)>::Bento(FunctionReturn (*ptr)(Function
 template<class FunctionReturn, class ...FunctionArgs>
 std::unique_ptr<BentoAbstract> Bento<FunctionReturn (*)(FunctionArgs...)>::clone() const
 {
-   return std::make_unique<Bento<FunctionReturn (*)(FunctionArgs...)>>(*this);
+   return Internal::make_unique<Bento<FunctionReturn (*)(FunctionArgs...)>>(*this);
 }
 
 template<class FunctionReturn, class ...FunctionArgs>
@@ -606,7 +640,7 @@ Bento<MethodReturn(MethodClass::*)(MethodArgs...)>::Bento(MethodReturn(MethodCla
 template<class MethodClass, class MethodReturn, class...MethodArgs>
 std::unique_ptr<BentoAbstract> Bento<MethodReturn(MethodClass::*)(MethodArgs...)>::clone() const
 {
-   return std::make_unique<Bento<MethodReturn(MethodClass::*)(MethodArgs...)>>(*this);
+   return Internal::make_unique<Bento<MethodReturn(MethodClass::*)(MethodArgs...)>>(*this);
 }
 
 template<class MethodClass, class MethodReturn, class...MethodArgs>
@@ -659,7 +693,7 @@ Bento<MethodReturn(MethodClass::*)(MethodArgs...) const>::Bento(MethodReturn(Met
 template<class MethodClass, class MethodReturn, class...MethodArgs>
 std::unique_ptr<BentoAbstract> Bento<MethodReturn(MethodClass::*)(MethodArgs...) const>::clone() const
 {
-   return std::make_unique<Bento<MethodReturn(MethodClass::*)(MethodArgs...) const>>(*this);
+   return Internal::make_unique<Bento<MethodReturn(MethodClass::*)(MethodArgs...) const>>(*this);
 }
 
 template<class MethodClass, class MethodReturn, class...MethodArgs>

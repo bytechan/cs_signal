@@ -23,30 +23,33 @@ CsSignal::SignalBase::~SignalBase()
    try {
       auto senderListHandle = m_connectList.lock_read();
 
-      if (m_activateBusy > 0)  {
+      if (m_activateBusy > 0) {
          // activate() called a slot which then destroys this sender
          std::lock_guard<std::mutex> lock(get_mutex_beingDestroyed());
          get_beingDestroyed().insert(this);
       }
 
-      for (auto &item : *senderListHandle) {
-         const SlotBase *receiver = item.receiver;
+      auto iter = senderListHandle->begin();
+      const auto end = senderListHandle->end();
+
+      while (iter != end) {
+         const SlotBase *receiver = iter->receiver;
 
          if (receiver != nullptr) {
             auto receiverListHandle = receiver->m_possibleSenders.lock_write();
+            auto recvIter = receiverListHandle->begin();
+            const auto recvEnd = receiverListHandle->end();
 
-            auto iter = receiverListHandle->begin();
-
-            while (iter != receiverListHandle->end())   {
-
-               if (*iter == this) {
-                  iter = receiverListHandle->erase(iter);
+            while (recvIter != recvEnd) {
+               if (*recvIter == this) {
+                  recvIter = receiverListHandle->erase(recvIter);
                } else {
-                  ++iter;
+                  ++recvIter;
                }
 
             }
          }
+         ++iter;
       }
 
    } catch (...) {
@@ -112,18 +115,24 @@ int CsSignal::SignalBase::internal_cntConnections(const SlotBase *receiver,
    int retval = 0;
 
    auto senderListHandle = m_connectList.lock_read();
+   auto iter = senderListHandle->begin();
+   const auto end = senderListHandle->end();
 
-   for (auto &item : *senderListHandle) {
+   while (iter != end) {
+      const auto &item = *iter;
 
       if (receiver && item.receiver != receiver) {
+         ++iter;
          continue;
       }
 
-      if (*(item.signalMethod) != signalMethod_Bento)  {
+      if (*(item.signalMethod) != signalMethod_Bento) {
+         ++iter;
          continue;
       }
 
-      retval++;
+      ++retval;
+      ++iter;
    }
 
    return retval;
@@ -135,14 +144,19 @@ std::set<CsSignal::SlotBase *> CsSignal::SignalBase::internal_receiverList(
    std::set<SlotBase *> retval;
 
    auto senderListHandle = m_connectList.lock_read();
+   auto iter = senderListHandle->begin();
+   const auto end = senderListHandle->end();
 
-   for (auto &item : *senderListHandle) {
+   while (iter != end) {
+      const auto &item = *iter;
 
-      if (*(item.signalMethod) != signalMethod_Bento)  {
+      if (*(item.signalMethod) != signalMethod_Bento) {
+         ++iter;
          continue;
       }
 
       retval.insert(const_cast<SlotBase *>(item.receiver));
+      ++iter;
    }
 
    return retval;
