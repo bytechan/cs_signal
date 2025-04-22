@@ -109,6 +109,9 @@ class LIB_SIG_EXPORT SlotBase
       template<class Sender, class Receiver>
       friend bool internal_disconnect(const Sender *sender, const Internal::BentoAbstract *signalBento,
                   const Receiver *receiver, const Internal::BentoAbstract *slotBento);
+      
+      template<class Sender, class SignalClass, class ...SignalArgs>
+      friend bool disconnect(const Sender *sender, void (SignalClass::*signalMethod)(SignalArgs...));
 };
 
 

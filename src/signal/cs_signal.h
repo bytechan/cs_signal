@@ -73,6 +73,9 @@ bool connect(const Sender *sender, void (SignalClass::*signalMethod)(SignalArgs.
                   const Receiver *receiver, T slotLambda,
                   ConnectionKind type = ConnectionKind::AutoConnection, bool uniqueConnection = false);
 
+template<class Sender, class SignalClass, class ...SignalArgs, class T>
+bool connect(const Sender *sender, void (SignalClass::*signalMethod)(SignalArgs...), T slotLambda);
+
 template<class Sender, class Receiver>
 bool connect(const Sender *sender, std::unique_ptr<Internal::BentoAbstract> signalMethod_Bento,
                   const Receiver *receiver, std::unique_ptr<Internal::BentoAbstract> slotMethod_Bento,
@@ -139,6 +142,9 @@ class LIB_SIG_EXPORT SignalBase
       template<class Sender, class Receiver>
       friend bool internal_disconnect(const Sender *sender, const Internal::BentoAbstract *signalBento,
                   const Receiver *receiver, const Internal::BentoAbstract *slotBento);
+     
+      template<class Sender, class SignalClass, class ...SignalArgs>
+      friend bool disconnect(const Sender *sender, void (SignalClass::*signalMethod)(SignalArgs...));
 
       friend class SlotBase;
 };
@@ -185,13 +191,9 @@ void activate(Sender &sender, void (SignalClass::*signal)(SignalArgTypes...), Ts
 
       ++iter;
 
-      if (! receiver) {
-         continue;
-      }
-
       // check if this is a queued connection
       if (connection.type == ConnectionKind::QueuedConnection ||
-            (connection.type == ConnectionKind::AutoConnection && ! receiver->compareThreads())) {
+            (connection.type == ConnectionKind::AutoConnection && receiver && ! receiver->compareThreads())) {
 
          // create a copy of the signal parameters
          auto teaCup_Data = Internal::make_unique<Internal::TeaCup_Data<SignalArgTypes...>>(true, std::forward<Ts>(Vs)...);
@@ -227,8 +229,8 @@ void activate(Sender &sender, void (SignalClass::*signal)(SignalArgTypes...), Ts
 // signal & slot method ptr
 template<class Sender, class SignalClass, class ...SignalArgs, class Receiver, class SlotClass,
                   class ...SlotArgs, class SlotReturn>
-bool connect(const Sender *sender, void (SignalClass::*signalMethod)(SignalArgs...),
-                  const Receiver *receiver, SlotReturn (SlotClass::*slotMethod)(SlotArgs...),
+bool connect(const Sender *sender, void (SignalClass::*signalMethod)(SignalArgs...), const Receiver *receiver,
+                  SlotReturn (SlotClass::*slotMethod)(SlotArgs...),
                   ConnectionKind type, bool uniqueConnection)
 {
 
@@ -278,7 +280,8 @@ bool connect(const Sender *sender, void (SignalClass::*signalMethod)(SignalArgs.
       while (iter != end) {
          const auto &item = *iter;
 
-         if (item.receiver != receiver) {
+         if ((receiver == nullptr) != (item.receiver == nullptr) ||
+             (receiver != nullptr && item.receiver != receiver)) {
             ++iter;
             continue;
          }
@@ -333,7 +336,8 @@ bool connect(const Sender *sender, void (SignalClass::*signalMethod)(SignalArgs.
       while (iter != end) {
          const auto &item = *iter;
 
-         if (item.receiver != receiver) {
+         if ((receiver == nullptr) != (item.receiver == nullptr) ||
+             (receiver != nullptr && item.receiver != receiver)) {
             ++iter;
             continue;
          }
@@ -355,7 +359,6 @@ bool connect(const Sender *sender, void (SignalClass::*signalMethod)(SignalArgs.
    return true;
 }
 
-
 // signal & slot bento
 template<class Sender, class Receiver>
 bool connect(const Sender *sender, std::unique_ptr<Internal::BentoAbstract> signalMethod_Bento, const Receiver *receiver,
@@ -371,7 +374,8 @@ bool connect(const Sender *sender, std::unique_ptr<Internal::BentoAbstract> sign
       while (iter != end) {
          const auto &item = *iter;
 
-         if (item.receiver != receiver) {
+         // For lambda connections (receiver is nullptr), we only compare signal and slot methods
+         if (receiver != nullptr && item.receiver != receiver) {
             ++iter;
             continue;
          }
@@ -439,6 +443,12 @@ bool disconnect(const Sender *sender, void (SignalClass::*signalMethod)(SignalAr
    return true;
 }
 
+template<class Sender, class SignalClass, class ...SignalArgs, class T>
+bool disconnect(const Sender *sender, void (SignalClass::*signalMethod)(SignalArgs...), T slotMethod)
+{
+   return disconnect(sender, &SignalClass::signalMethod, nullptr, slotMethod);
+}
+
 // signal & slot bento objects
 template<class Sender, class Receiver>
 bool internal_disconnect(const Sender *sender, const Internal::BentoAbstract *signalBento,
@@ -490,6 +500,63 @@ bool internal_disconnect(const Sender *sender, const Internal::BentoAbstract *si
    }
 
    return retval;
+}
+
+// disconnect all connections for a signal
+template<class Sender, class SignalClass, class ...SignalArgs>
+bool disconnect(const Sender *sender, void (SignalClass::*signalMethod)(SignalArgs...))
+{
+   // Sender must be the same class as SignalClass and Sender is a child of SignalClass
+   Internal::cs_testConnect_SenderSignal<Sender, SignalClass>();
+
+   Internal::Bento<void (SignalClass::*)(SignalArgs...)> signalMethod_Bento(signalMethod);
+   bool retval = false;
+
+   auto senderListHandle = sender->m_connectList.lock_write();
+   auto iter = senderListHandle->begin();
+
+   while (iter != senderListHandle->end()) {
+      if (signalMethod_Bento == *iter->signalMethod) {
+         // found a match, remove this connection
+         const SlotBase *receiver = iter->receiver;
+
+         if (receiver != nullptr) {
+            // remove sender from receiver's sender list
+            auto receiverListHandle = receiver->m_possibleSenders.lock_write();
+            auto recvIter = receiverListHandle->begin();
+
+            while (recvIter != receiverListHandle->end()) {
+               if (*recvIter == sender) {
+                  recvIter = receiverListHandle->erase(recvIter);
+               } else {
+                  ++recvIter;
+               }
+            }
+         }
+
+         iter = senderListHandle->erase(iter);
+         retval = true;
+      } else {
+         ++iter;
+      }
+   }
+
+   return retval;
+}
+
+// signal & slot method ptr
+template<class Sender, class SignalClass, class ...SignalArgs, class T>
+bool connect(const Sender *sender, void (SignalClass::*signalMethod)(SignalArgs...), T slotLambda)
+{
+   // Convert signal method to a Bento object for type-safe storage
+   auto signalBento = Internal::make_unique<Internal::Bento<void (SignalClass::*)(SignalArgs...)>>(signalMethod);
+
+   // Create a Bento wrapper for the lambda
+   auto slotBento = Internal::make_unique<Internal::Bento<T>>(slotLambda);
+
+   // Call the internal connect implementation with default connection type
+   return connect<Sender, SlotBase>(sender, std::move(signalBento), nullptr, std::move(slotBento),
+                  ConnectionKind::AutoConnection, false);
 }
 
 }  // namespace
