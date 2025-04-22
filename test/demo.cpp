@@ -20,7 +20,7 @@
 
 void Demo_Receiver::toggled(bool onOff)
 {
-   ++m_slotPressed;
+   m_slotToggled = onOff;
 }
 
 void Demo_Receiver::methodPressed()
@@ -43,4 +43,3 @@ void Demo_Receiver::queueSlot(CsSignal::PendingSlot data, CsSignal::ConnectionKi
    // wake up the thread
    m_alarm->notify_one();
 }
-

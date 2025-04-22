@@ -1,4 +1,3 @@
-include(Load_Catch2)
 include(CTest)
 
 find_package(Threads)
@@ -51,6 +50,6 @@ if (Threads_FOUND)
       ${CMAKE_CURRENT_SOURCE_DIR}/test_main.cpp
    )
 
-   include(ParseAndAddCatchTests)
+   include(${CMAKE_SOURCE_DIR}/cmake/modules/ParseAndAddCatchTests.cmake)
    ParseAndAddCatchTests(CsSignalTest)
 endif()

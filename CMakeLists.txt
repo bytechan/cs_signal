@@ -12,8 +12,6 @@ if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.20.0")
    cmake_policy(SET CMP0117 OLD)
 endif()
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/modules/")
-
 project(cs_signal)
 
 set(BUILD_MAJOR "1")
@@ -125,6 +123,11 @@ endif()
 
 # catch2 set up
 if (BUILD_TESTS)
+   find_package(Catch2)
+   if(NOT Catch2_FOUND)
+      message(FATAL_ERROR "Catch2 was not found")
+   endif()
+
    enable_testing()
    add_subdirectory(test)
 endif()

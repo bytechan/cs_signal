@@ -48,10 +48,11 @@ class Demo_Receiver : public CsSignal::SlotBase
    void templatePressed();
 
    int m_slotPressed = 0;
+   bool m_slotToggled = false;
 
-   std::deque<CsSignal::PendingSlot> *m_array;
-   std::mutex *m_mutex;
-   std::condition_variable *m_alarm;
+   std::deque<CsSignal::PendingSlot> *m_array = nullptr;
+   std::mutex *m_mutex = nullptr;
+   std::condition_variable *m_alarm = nullptr;
 
  private:
    void queueSlot(CsSignal::PendingSlot data, CsSignal::ConnectionKind type) override;
@@ -64,4 +65,3 @@ void Demo_Receiver::templatePressed()
 }
 
 #endif
-
